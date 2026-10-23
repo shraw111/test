@@ -207,9 +207,10 @@ The last good bundle stays on screen while a fix is in progress. The preview nev
 
 ## 4. Phases and tasks
 
-### Phase 0: Spike (½ day)
-- [ ] Load esbuild-wasm in a worker, bundle a hardcoded two-file VFS with React external, and render it in an iframe through the import map.
-- [ ] Confirm hooks work, with no duplicate-React warning, using a DS component that calls `useState`.
+### Phase 0: Spike (½ day). **Done** (see README.md)
+- [x] Load esbuild-wasm in a worker, bundle an in-memory multi-file project with React external, and render it in an iframe through the import map.
+- [x] Confirm hooks work, with no duplicate-React warning, using a DS component that calls `useState`.
+- [x] Also done early: stub DS + local CDN build (phase 1), runtime error and console capture, sandbox + CSP isolation, e2e tests.
 
 **Exit:** a counter app built from in-memory strings renders and updates.
 
