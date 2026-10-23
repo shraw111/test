@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PreviewEngine, type Diagnostic, type Files } from "./engine";
+import { Editor } from "./Editor";
 import { DEFAULT_EXAMPLE, EXAMPLES } from "./examples";
 
 const PREVIEW_URL = import.meta.env.VITE_PREVIEW_URL ?? "http://localhost:5181/";
+const typeCheckMode = (() => {
+  const value = new URLSearchParams(window.location.search).get("typeCheck");
+  return value === "block" || value === "off" ? value : "report";
+})();
 const iframeSrc = `${PREVIEW_URL}?parent=${encodeURIComponent(window.location.origin)}`;
 
 type Status =
@@ -12,7 +17,7 @@ type Status =
   | { kind: "compile-error"; ms: number }
   | { kind: "runtime-error" };
 
-type Problem = Diagnostic & { source: "compile" | "runtime" };
+type Problem = Diagnostic & { origin: "compile" | "types" | "runtime" };
 type ConsoleLine = { level: string; text: string };
 
 export default function App() {
@@ -20,38 +25,57 @@ export default function App() {
   const [files, setFiles] = useState<Files>(EXAMPLES[DEFAULT_EXAMPLE]);
   const [active, setActive] = useState(Object.keys(EXAMPLES[DEFAULT_EXAMPLE])[0]);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [problems, setProblems] = useState<Problem[]>([]);
+  const [buildProblems, setBuildProblems] = useState<Problem[]>([]);
+  const [typeProblems, setTypeProblems] = useState<Problem[]>([]);
+  const [runtimeProblems, setRuntimeProblems] = useState<Problem[]>([]);
+  const [typeCheckState, setTypeCheckState] = useState<"checking" | "done" | "unavailable">("checking");
   const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
   const [panel, setPanel] = useState<"problems" | "console">("problems");
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const engineRef = useRef<PreviewEngine | null>(null);
+  const problems = useMemo(
+    () => [...buildProblems, ...typeProblems, ...runtimeProblems],
+    [buildProblems, typeProblems, runtimeProblems],
+  );
+  const typeErrorCount = typeProblems.filter((p) => p.severity === "error").length;
 
   useEffect(() => {
-    const engine = new PreviewEngine(iframeRef.current!);
+    const engine = new PreviewEngine(iframeRef.current!, { typeCheck: typeCheckMode });
     engineRef.current = engine;
     let currentBuild = 0;
     const unsubscribe = engine.subscribe((event) => {
       switch (event.type) {
         case "compiling":
           setStatus({ kind: "compiling" });
+          setTypeCheckState("checking");
+          break;
+        case "typechecked":
+          if (event.error) {
+            setTypeCheckState("unavailable");
+            console.error("Type-check unavailable:", event.error);
+          } else {
+            setTypeCheckState("done");
+            setTypeProblems(event.diagnostics.map((d) => ({ ...d, origin: "types" })));
+          }
           break;
         case "compiled":
           if (event.result.ok) {
             currentBuild = event.buildId;
             setStatus({ kind: "ok", ms: event.result.ms });
-            setProblems([]);
+            setBuildProblems([]);
+            setRuntimeProblems([]);
             setConsoleLines([]);
           } else {
             setStatus({ kind: "compile-error", ms: event.result.ms });
-            setProblems(event.result.errors.map((e) => ({ ...e, source: "compile" })));
+            setBuildProblems(event.result.errors.map((e) => ({ ...e, severity: "error", origin: "compile" })));
             setPanel("problems");
           }
           break;
         case "runtime-error":
           if (event.buildId !== currentBuild) break;
           setStatus({ kind: "runtime-error" });
-          setProblems((prev) => [...prev, { message: event.message, source: "runtime" }]);
+          setRuntimeProblems((prev) => [...prev, { message: event.message, severity: "error", origin: "runtime" }]);
           setPanel("problems");
           break;
         case "console":
@@ -91,16 +115,6 @@ export default function App() {
     if (active === name) setActive(Object.keys(rest)[0] ?? "");
   }
 
-  function onEditorKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== "Tab") return;
-    e.preventDefault();
-    const el = e.currentTarget;
-    const { selectionStart: start, selectionEnd: end } = el;
-    const next = el.value.slice(0, start) + "  " + el.value.slice(end);
-    setFiles({ ...files, [active]: next });
-    requestAnimationFrame(() => el.setSelectionRange(start + 2, start + 2));
-  }
-
   function reloadPreview() {
     engineRef.current?.resetPreview();
     if (iframeRef.current) iframeRef.current.src = iframeSrc;
@@ -115,7 +129,7 @@ export default function App() {
             <option key={name}>{name}</option>
           ))}
         </select>
-        <StatusPill status={status} />
+        <StatusPill status={status} typeErrors={typeErrorCount} typeCheck={typeCheckState} />
         <button className="ghost" onClick={reloadPreview}>
           Reload preview
         </button>
@@ -138,13 +152,11 @@ export default function App() {
           </button>
         </div>
         {active in files ? (
-          <textarea
-            aria-label="Code editor"
-            wrap="off"
-            spellCheck={false}
+          <Editor
+            filename={active}
             value={files[active]}
-            onChange={(e) => setFiles({ ...files, [active]: e.target.value })}
-            onKeyDown={onEditorKeyDown}
+            diagnostics={problems.filter((p) => p.file === active)}
+            onChange={(value) => setFiles((prev) => ({ ...prev, [active]: value }))}
           />
         ) : (
           <div className="empty">Add a file to start.</div>
@@ -175,14 +187,15 @@ export default function App() {
                 <div className="muted">No problems.</div>
               ) : (
                 problems.map((p, i) => (
-                  <div key={i} className={`line ${p.source}`}>
-                    <span className="tag">{p.source}</span>
+                  <div key={i} className={`line ${p.origin}`}>
+                    <span className="tag">{p.origin}</span>
                     {p.file && (
                       <span className="loc">
                         {p.file}
                         {p.line != null && `:${p.line}:${(p.column ?? 0) + 1}`}
                       </span>
                     )}
+                    {p.code != null && <span className="code">TS{p.code} </span>}
                     {p.message}
                   </div>
                 ))
@@ -205,16 +218,27 @@ export default function App() {
   );
 }
 
-function StatusPill({ status }: { status: Status }) {
+function StatusPill({
+  status,
+  typeErrors,
+  typeCheck,
+}: {
+  status: Status;
+  typeErrors: number;
+  typeCheck: "checking" | "done" | "unavailable";
+}) {
+  const suffix =
+    typeCheck === "checking" ? " · checking types…" : typeErrors > 0 ? ` · ${typeErrors} type error${typeErrors > 1 ? "s" : ""}` : "";
   const text = {
     idle: "Starting…",
     compiling: "Compiling…",
-    ok: status.kind === "ok" ? `Rendered · built in ${status.ms} ms` : "",
+    ok: status.kind === "ok" ? `Rendered · built in ${status.ms} ms${suffix}` : "",
     "compile-error": "Compile error",
     "runtime-error": "Runtime error",
   }[status.kind];
+  const tone = status.kind === "ok" && typeErrors > 0 && typeCheck === "done" ? "status-warn" : `status-${status.kind}`;
   return (
-    <span className={`status status-${status.kind}`} role="status" data-testid="status">
+    <span className={`status ${tone}`} role="status" data-testid="status">
       {text}
     </span>
   );

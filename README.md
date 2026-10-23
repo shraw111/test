@@ -26,6 +26,10 @@ editor files ──▶ compile.worker (esbuild-wasm) ──▶ postMessage ─�
 |---|---|
 | `src/engine/compile.ts` | Bundles the in-memory files. Allowlisted bare imports stay external and anything else is a compile error. |
 | `src/engine/compile.worker.ts` | Runs `compile` inside esbuild-wasm off the main thread. |
+| `src/engine/typecheck.ts` | In-memory TypeScript environment (`@typescript/vfs`) that checks user files against the React and `@ds/ui` declarations. Only user files are reported on. |
+| `src/engine/typecheck.worker.ts` | Runs the checker off the main thread. It is created on the first `render()`, so TypeScript and the type bundle are never on the critical path. |
+| `src/Editor.tsx` | CodeMirror editor with syntax highlighting. It shows compile, type and runtime errors inline and in the gutter. |
+| `scripts/build-types.mjs` | Packages React, the DS declarations (emitted from `ds/src`) and the TS lib files into `public/types.json`. |
 | `src/engine/preview-bridge.ts` | postMessage protocol with the iframe. |
 | `src/engine/index.ts` | `PreviewEngine`: compile, then load. The newest build wins, and a failed build keeps the last good one on screen. |
 | `preview/runtime.js` | Inside the iframe: imports the bundle from a blob URL, renders it in an error boundary, and reports `rendered`, `runtime-error` and `console` messages. |
@@ -38,6 +42,12 @@ editor files ──▶ compile.worker (esbuild-wasm) ──▶ postMessage ─�
 
 - **One React instance.** Every bundle keeps `react` external and the import map resolves it once, so hooks work in both generated code and DS components.
 - **Isolation.** The iframe is sandboxed without `allow-same-origin`, so it gets an opaque origin: no access to the app's DOM, cookies or storage. CSP sets `connect-src 'none'`, so generated code cannot call the network.
+- **Type errors are caught against the design system.** A wrong prop value (`variant="danger"`), a missing required prop or a bad import is reported with file, line and column. `PreviewEngine` takes `{ typeCheck }`:
+  - `"report"` (default): render anyway and show the errors. Suited to a person typing.
+  - `"block"`: don't render a build that has type errors; the last good build stays on screen. Suited to model output, which should be corrected before anything renders.
+  - `"off"`: skip it entirely. TypeScript is never downloaded.
+
+  The app accepts `?typeCheck=block` or `?typeCheck=off`.
 - **Errors come back.** Compile errors come with file, line and column. Errors thrown on import, render errors, event-handler errors and unhandled rejections are all posted back, and so is console output.
 
 ## Tests
@@ -55,4 +65,14 @@ npm run test:e2e   # Playwright against the real app + preview origin
 
 ## Costs to know
 
-esbuild.wasm is 14MB raw and 3.8MB gzipped. It downloads once and is then cached. On the first page load, esbuild initialisation plus the first build took about 1.2s in tests.
+Measured in headless Chromium against a local server:
+
+| | Size | When it loads |
+|---|---|---|
+| esbuild.wasm | 14MB raw, 3.8MB gzipped | On page load, cached afterwards |
+| TypeScript worker | 3.6MB raw | On the first `render()`, in parallel with compile |
+| `types.json` | 4.5MB raw, 0.6MB gzipped | With the TypeScript worker |
+
+- The preview is visible about 2.3s after load. It doesn't wait for type-checking, which finishes about 1.5s later on a cold load.
+- Later type-checks take about 0.4s, because the environment is updated incrementally.
+- Serve all of these with long cache headers.

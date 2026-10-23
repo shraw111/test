@@ -3,3 +3,4 @@ dist/
 preview/dist/
 test-results/
 playwright-report/
+public/types.json

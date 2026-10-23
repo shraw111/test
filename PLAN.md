@@ -230,10 +230,11 @@ The last good bundle stays on screen while a fix is in progress. The preview nev
 
 **Exit:** "Build a pricing page with three tiers" streams files, the preview appears without a deploy, and a forced bad import is auto-fixed.
 
-### Phase 3: Type-check and polish (1–2 days)
-- [ ] Validator tier 3: lazy `@typescript/vfs`, with DS `.d.ts` from the CDN.
-- [ ] Code panel (read-only, shows streaming text), file tree, and an error drawer.
-- [ ] Measure first-load cost and confirm the TS worker is not on the critical path.
+### Phase 3: Type-check and polish (1–2 days). **Mostly done** (see README.md)
+- [x] Validator tier 3: lazy `@typescript/vfs`, with DS `.d.ts` bundled from the DS source. A `typeCheck: "block"` mode gates rendering. It is not yet loaded from a CDN.
+- [x] Editor (CodeMirror) with inline errors, and an error panel.
+- [x] Measured first-load cost: the TS worker is off the critical path.
+- [ ] Still to do: file tree, a read-only streaming code view, and DS lint rules (tier 2).
 
 **Exit:** a wrong prop type is caught before render and fixed by the model.
 

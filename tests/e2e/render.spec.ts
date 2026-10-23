@@ -96,3 +96,65 @@ test("a module that throws while loading keeps the previous build on screen", as
   await expect(page.getByTestId("problems-panel")).toContainText("top-level failure");
   await expect(preview(page).getByRole("heading", { name: "Good build" })).toBeVisible();
 });
+
+test.describe("type checking", () => {
+  test("a valid project reports no type errors", async ({ page }) => {
+    await expect(status(page)).not.toContainText("checking types", { timeout: 30_000 });
+    await expect(status(page)).not.toContainText("type error");
+    await expect(page.getByRole("button", { name: /Problems \(0\)/ })).toBeVisible();
+  });
+
+  test("a wrong design-system prop is flagged inline and in the problems panel but still renders", async ({ page }) => {
+    await setCode(
+      page,
+      `import { Button } from "@ds/ui";\nexport default () => <Button variant="danger">Delete</Button>;`,
+    );
+    await expect(preview(page).getByRole("button", { name: "Delete" })).toBeVisible();
+    await expect(status(page)).toContainText("1 type error", { timeout: 30_000 });
+    await expect(page.locator(".cm-lintRange-error")).toHaveCount(1);
+    await expect(page.getByTestId("problems-panel")).toContainText("TS2322");
+    await expect(page.getByTestId("problems-panel")).toContainText('"danger"');
+    await expect(page.getByTestId("problems-panel")).toContainText("App.tsx:2:");
+  });
+
+  test("fixing the error clears it", async ({ page }) => {
+    await setCode(page, `import { Button } from "@ds/ui";\nexport default () => <Button variant="nope">x</Button>;`);
+    await expect(status(page)).toContainText("1 type error", { timeout: 30_000 });
+    await setCode(page, `import { Button } from "@ds/ui";\nexport default () => <Button variant="ghost">x</Button>;`);
+    await expect(status(page)).toHaveText(/^Rendered · built in \d+ ms$/, { timeout: 30_000 });
+    await expect(page.locator(".cm-lintRange-error")).toHaveCount(0);
+  });
+
+  test("the editor highlights code and keeps one editor per file", async ({ page }) => {
+    await expect(page.locator(".cm-content .tok-keyword, .cm-content [class*='ͼ']").first()).toBeVisible();
+    await page.getByRole("tab", { name: "styles.css" }).click();
+    await expect(page.locator(".cm-content")).toContainText(".plans");
+    await expect(page.locator(".cm-editor")).toHaveCount(1);
+  });
+});
+
+test.describe("typeCheck=block (how model output will be gated)", () => {
+  test("a build with type errors does not replace the last good preview", async ({ page }) => {
+    await page.goto("/?typeCheck=block");
+    await expect(preview(page).getByText("Pricing")).toBeVisible({ timeout: 30_000 });
+
+    await setCode(page, `import { Button } from "@ds/ui";\nexport default () => <Button variant="danger">Bad build</Button>;`);
+    await expect(status(page)).toContainText("1 type error", { timeout: 30_000 });
+    await expect(preview(page).getByText("Bad build")).toHaveCount(0);
+    await expect(preview(page).getByText("Pricing")).toBeVisible();
+
+    await setCode(page, `import { Button } from "@ds/ui";\nexport default () => <Button variant="ghost">Good build</Button>;`);
+    await expect(preview(page).getByText("Good build")).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test.describe("typeCheck=off", () => {
+  test("never downloads TypeScript or the type bundle", async ({ page }) => {
+    const requested: string[] = [];
+    page.on("request", (r) => requested.push(r.url()));
+    await page.goto("/?typeCheck=off");
+    await expect(preview(page).getByText("Pricing")).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(500);
+    expect(requested.filter((u) => /typecheck|types\.json/.test(u))).toEqual([]);
+  });
+});

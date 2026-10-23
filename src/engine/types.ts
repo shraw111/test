@@ -2,6 +2,11 @@
 export type Files = Record<string, string>;
 
 export interface Diagnostic {
+  severity?: "error" | "warning";
+  /** Which check produced it, e.g. "typescript". */
+  source?: string;
+  /** Tool-specific code, e.g. 2322 for a TypeScript assignability error. */
+  code?: number;
   file?: string;
   line?: number;
   column?: number;
