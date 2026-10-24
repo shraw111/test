@@ -2,6 +2,8 @@
 
 Renders React code in the user's browser with no server-side build. The browser compiles the files with esbuild-wasm in a web worker and runs them in a sandboxed iframe on a separate origin. React and the design system come from static files through an import map.
 
+> Continuing this project? Read [HANDOFF.md](HANDOFF.md) first.
+
 This is the rendering engine. The chat that generates the code comes later and will drive `PreviewEngine.render(files)` (see [PLAN.md](PLAN.md)).
 
 ## Run it
