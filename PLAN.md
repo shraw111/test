@@ -251,6 +251,14 @@ The last good bundle stays on screen while a fix is in progress. The preview nev
 
 ---
 
+## 4b. AEM content fragments: **built** (see README.md)
+
+Read from a pasted link, or create a draft and save it to a fixed folder on confirmation. Works for AEM as a Cloud Service and 6.5 through one Assets HTTP API client with the two authentication modes. Still to do:
+- [ ] Verify against a real Cloud Service and a real 6.5 instance.
+- [ ] Read model definitions from AEM instead of inferring them from field values, so fields that are empty in the sample still get types.
+- [ ] GraphQL persisted queries (cacheable on the Cloud Service CDN), and references between fragments.
+- [ ] Per-user credentials, if a shared service account stops being enough.
+
 ## 5. Risks and mitigations
 
 | Risk | Mitigation |

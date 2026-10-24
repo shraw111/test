@@ -14,11 +14,11 @@ function getChecker() {
   return checker;
 }
 
-self.onmessage = async (event: MessageEvent<{ id: number; files: Files }>) => {
-  const { id, files } = event.data;
+self.onmessage = async (event: MessageEvent<{ id: number; files: Files; ambient?: Record<string, string> }>) => {
+  const { id, files, ambient } = event.data;
   try {
     const started = performance.now();
-    const diagnostics = (await getChecker()).check(files);
+    const diagnostics = (await getChecker()).check(files, ambient);
     self.postMessage({ id, diagnostics, ms: Math.round(performance.now() - started) });
   } catch (error) {
     self.postMessage({ id, error: String(error) });

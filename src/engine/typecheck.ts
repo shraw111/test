@@ -14,6 +14,7 @@ const IS_CHECKED = /\.(tsx?|jsx?)$/;
 export class TypeChecker {
   private env: VirtualTypeScriptEnvironment;
   private known = new Set<string>();
+  private knownAmbient = new Set<string>();
 
   constructor(private ts: typeof TS, typeFiles: TypeFiles) {
     const options: TS.CompilerOptions = {
@@ -37,7 +38,20 @@ export class TypeChecker {
     this.env = createVirtualTypeScriptEnvironment(system, roots, ts, options);
   }
 
-  check(files: Files): Diagnostic[] {
+  /**
+   * `ambient` adds declaration files that are visible to the project but never
+   * reported on (absolute paths), e.g. types generated from loaded content.
+   */
+  check(files: Files, ambient: Record<string, string> = {}): Diagnostic[] {
+    for (const path of this.knownAmbient) {
+      if (!(path in ambient)) this.env.deleteFile(path);
+    }
+    for (const [path, content] of Object.entries(ambient)) {
+      if (this.env.getSourceFile(path)) this.env.updateFile(path, content);
+      else this.env.createFile(path, content);
+    }
+    this.knownAmbient = new Set(Object.keys(ambient));
+
     const paths = Object.keys(files).filter((name) => IS_CHECKED.test(name)).map((name) => `/${name}`);
 
     for (const path of this.known) {

@@ -1,3 +1,5 @@
+import { contentTypeFiles } from "../content/typegen";
+import type { ContentStore } from "../content/store";
 import { Compiler } from "./compiler";
 import { PreviewBridge } from "./preview-bridge";
 import { TypeCheckerClient } from "./type-checker-client";
@@ -23,6 +25,8 @@ export interface EngineOptions {
    * - "off": skip type-checking (TypeScript is never even downloaded).
    */
   typeCheck?: "report" | "block" | "off";
+  /** Content the preview can read through `@aem/content`. */
+  content?: ContentStore;
 }
 
 /**
@@ -43,7 +47,15 @@ export class PreviewEngine {
   constructor(iframe: HTMLIFrameElement, private options: EngineOptions = {}) {
     this.bridge = new PreviewBridge(iframe);
     this.bridge.subscribe((event) => this.emit(event));
+
+    const content = options.content;
+    if (content) {
+      this.bridge.setContentHandler((op, args) => (op === "get" ? content.data(args.path) : content.list(args.model)));
+      this.stopContent = content.subscribe(() => this.bridge.notifyContentChanged());
+    }
   }
+
+  private stopContent?: () => void;
 
   async render(files: Files): Promise<CompileResult | undefined> {
     const buildId = ++this.latest;
@@ -68,7 +80,8 @@ export class PreviewEngine {
 
   private async typeCheck(buildId: number, files: Files): Promise<Diagnostic[]> {
     try {
-      const diagnostics = await this.typeChecker.check(files);
+      const ambient = contentTypeFiles(this.options.content?.all() ?? []);
+      const diagnostics = await this.typeChecker.check(files, ambient);
       if (buildId === this.latest) this.emit({ type: "typechecked", buildId, diagnostics });
       return diagnostics;
     } catch (error) {
@@ -99,6 +112,7 @@ export class PreviewEngine {
   dispose() {
     this.compiler.dispose();
     this.typeChecker.dispose();
+    this.stopContent?.();
     this.bridge.dispose();
     this.listeners.clear();
   }

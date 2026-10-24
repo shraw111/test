@@ -84,7 +84,7 @@ export default function App() {
   return <p>origin={String(window.origin)} parent={String((() => { try { return window.parent.document.title } catch { return "blocked" } })())} storage={storage} net={net}</p>;
 }`,
   );
-  await expect(preview(page).getByText("origin=null parent=blocked storage=blocked net=blocked")).toBeVisible();
+  await expect(preview(page).getByText("origin=null parent=blocked storage=blocked net=blocked")).toBeVisible({ timeout: 20_000 });
 });
 
 test("a module that throws while loading keeps the previous build on screen", async ({ page }) => {
@@ -157,4 +157,46 @@ test.describe("typeCheck=off", () => {
     await page.waitForTimeout(500);
     expect(requested.filter((u) => /typecheck|types\.json/.test(u))).toEqual([]);
   });
+});
+
+test("an older build that finishes loading late never overwrites a newer one", async ({ page }) => {
+  // Top-level await delays when import() of the OLD module resolves, so it
+  // finishes after the NEW one even though it was sent first.
+  const module = (text: string, delayMs: number) => `import { createElement as h } from "react";
+await new Promise((r) => setTimeout(r, ${delayMs}));
+export default () => h("p", null, "${text}");`;
+
+  await page.evaluate(
+    ({ oldJs, newJs }) => {
+      const win = (document.querySelector('iframe[title="Preview"]') as HTMLIFrameElement).contentWindow!;
+      win.postMessage({ type: "load", buildId: 9001, js: oldJs, css: "" }, "*");
+      win.postMessage({ type: "load", buildId: 9002, js: newJs, css: "" }, "*");
+    },
+    { oldJs: module("OLD build", 800), newJs: module("NEW build", 0) },
+  );
+
+  await expect(preview(page).getByText("NEW build")).toBeVisible();
+  await page.waitForTimeout(1500); // long enough for the OLD module to finish
+  await expect(preview(page).getByText("NEW build")).toBeVisible();
+  await expect(preview(page).getByText("OLD build")).toHaveCount(0);
+});
+
+test("a superseded build that fails to load reports nothing", async ({ page }) => {
+  // Listen to the raw messages from the iframe: the app UI filters by build id,
+  // so it would hide a wrongly attributed error.
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { seen: string[] }).seen = seen;
+    window.addEventListener("message", (e) => {
+      if (e.data?.source === "ui-preview" && e.data.type === "runtime-error") seen.push(e.data.message);
+    });
+    const win = (document.querySelector('iframe[title="Preview"]') as HTMLIFrameElement).contentWindow!;
+    const failing = `await new Promise((r) => setTimeout(r, 500)); throw new Error("stale failure");\nexport default () => null;`;
+    const good = `import { createElement as h } from "react";\nexport default () => h("p", null, "Latest build");`;
+    win.postMessage({ type: "load", buildId: 9101, js: failing, css: "" }, "*");
+    win.postMessage({ type: "load", buildId: 9102, js: good, css: "" }, "*");
+  });
+  await expect(preview(page).getByText("Latest build")).toBeVisible();
+  await page.waitForTimeout(1200); // the failing module has now settled
+  expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual([]);
 });

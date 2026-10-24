@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PreviewEngine, type Diagnostic, type Files } from "./engine";
+import { ContentPanel } from "./ContentPanel";
+import { aemApi } from "./content/aem-api";
+import { ContentStore } from "./content/store";
+import { generateContentTypes } from "./content/typegen";
+import type { AemConfig } from "./content/types";
 import { Editor } from "./Editor";
 import { DEFAULT_EXAMPLE, EXAMPLES } from "./examples";
 
@@ -30,7 +35,12 @@ export default function App() {
   const [runtimeProblems, setRuntimeProblems] = useState<Problem[]>([]);
   const [typeCheckState, setTypeCheckState] = useState<"checking" | "done" | "unavailable">("checking");
   const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
-  const [panel, setPanel] = useState<"problems" | "console">("problems");
+  const [panel, setPanel] = useState<"problems" | "console" | "content">("problems");
+  const [store] = useState(() => new ContentStore());
+  const contentVersion = useSyncExternalStore(store.subscribe.bind(store), store.snapshot.bind(store));
+  const [aemConfig, setAemConfig] = useState<AemConfig>();
+  // Type declarations derived from the content; a change in shape triggers a re-check.
+  const contentTypes = useMemo(() => generateContentTypes(store.all()), [store, contentVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const engineRef = useRef<PreviewEngine | null>(null);
@@ -41,7 +51,7 @@ export default function App() {
   const typeErrorCount = typeProblems.filter((p) => p.severity === "error").length;
 
   useEffect(() => {
-    const engine = new PreviewEngine(iframeRef.current!, { typeCheck: typeCheckMode });
+    const engine = new PreviewEngine(iframeRef.current!, { typeCheck: typeCheckMode, content: store });
     engineRef.current = engine;
     let currentBuild = 0;
     const unsubscribe = engine.subscribe((event) => {
@@ -88,13 +98,20 @@ export default function App() {
       unsubscribe();
       engine.dispose();
     };
-  }, []);
+  }, [store]);
+
+  useEffect(() => {
+    void aemApi.config().then((config) => {
+      setAemConfig(config);
+      if (config.targetFolder) store.targetFolder = config.targetFolder;
+    });
+  }, [store]);
 
   // Rebuild shortly after typing stops.
   useEffect(() => {
     const timer = setTimeout(() => engineRef.current?.render(files), 250);
     return () => clearTimeout(timer);
-  }, [files]);
+  }, [files, contentTypes]);
 
   function loadExample(name: string) {
     setExample(name);
@@ -172,13 +189,16 @@ export default function App() {
           // cannot touch this app's cookies, storage or DOM.
           sandbox="allow-scripts allow-forms allow-modals allow-popups"
         />
-        <div className="panel">
+        <div className={`panel ${panel === "content" ? "panel-tall" : ""}`}>
           <div className="panel-tabs">
             <button className={panel === "problems" ? "active" : ""} onClick={() => setPanel("problems")}>
               Problems ({problems.length})
             </button>
             <button className={panel === "console" ? "active" : ""} onClick={() => setPanel("console")}>
               Console ({consoleLines.length})
+            </button>
+            <button className={panel === "content" ? "active" : ""} onClick={() => setPanel("content")}>
+              Content ({store.all().length})
             </button>
           </div>
           <div className="panel-body" data-testid={`${panel}-panel`}>
@@ -200,6 +220,7 @@ export default function App() {
                   </div>
                 ))
               ))}
+            {panel === "content" && <ContentPanel store={store} config={aemConfig} version={contentVersion} />}
             {panel === "console" &&
               (consoleLines.length === 0 ? (
                 <div className="muted">No console output.</div>

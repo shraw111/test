@@ -36,6 +36,10 @@ editor files ──▶ compile.worker (esbuild-wasm) ──▶ postMessage ─�
 | `preview/index.html` | Template for the preview page. The build injects the import map and its CSP hash. |
 | `cdn.config.json` | The import map. Its keys are the only packages generated code may import. |
 | `scripts/build-cdn.mjs` | Builds `preview/dist`: React and ReactDOM as ESM sharing one React, the DS bundle and CSS, and the preview page. |
+| `content/src/index.ts` | The `@aem/content` module generated code imports. Requests go to the app by `postMessage`. |
+| `src/content/` | Content store, sample data, type generation, and the client for the server API. |
+| `src/ContentPanel.tsx` | Paste-a-link, drafts, editing and Save to AEM. |
+| `server/` | API server: parses AEM links, reads and creates fragments on Cloud Service or 6.5. Holds the credentials. |
 | `ds/` | Stub design system (`@ds/ui`), standing in for the real one. |
 
 ### Guarantees (each covered by `tests/e2e`)
@@ -50,11 +54,53 @@ editor files ──▶ compile.worker (esbuild-wasm) ──▶ postMessage ─�
   The app accepts `?typeCheck=block` or `?typeCheck=off`.
 - **Errors come back.** Compile errors come with file, line and column. Errors thrown on import, render errors, event-handler errors and unhandled rejections are all posted back, and so is console output.
 
+## AEM content fragments
+
+Generated code reads content through `@aem/content`:
+
+```tsx
+import { useFragment, useFragmentList } from "@aem/content";
+const { data, loading, error } = useFragment("/content/dam/acme/summer-sale");
+const banners = useFragmentList("HeroBanner");   // every fragment of a model
+```
+
+The preview iframe still has no network access. Each call is a `postMessage` to the builder app, which answers from its content store. The store holds three kinds of fragment:
+
+| Source | Where it comes from |
+|---|---|
+| `sample` | Built-in sample data, so previews work with no AEM connection. |
+| `aem` | Fetched from AEM when a user pastes a link to a fragment. |
+| `draft` | Created in the builder. It lives in memory and is previewed live. |
+
+**Types follow the content.** Each loaded fragment's fields give a TypeScript interface per model, and the type-checker sees them. A field the model doesn't have, or a fragment path that isn't loaded, is a type error. Loading new content re-checks the code.
+
+**Flow A, paste a link.** Content tab, paste any link containing a `/content/dam/...` path (asset details, the 6.5 editor, the Experience Cloud shell, or a plain path), then Load. The server fetches it with its own credentials.
+
+**Flow B, create a fragment.** "New draft" picks a model and builds the field shape from a loaded fragment of that model. "Duplicate as draft" copies any fragment. Edit the fields as JSON and the preview updates live. **Save to AEM** asks for confirmation, then creates the fragment in `AEM_TARGET_FOLDER`. It never overwrites an existing fragment. Saved fragments are unpublished.
+
+A draft can only be saved if a fragment of its model has been loaded from AEM, because the real model path comes from there. Sample models can't be saved.
+
+### Server configuration
+
+The API server (`server/`) starts with `npm run dev`. It holds the credentials, so the browser and the preview never see them.
+
+| Variable | Meaning |
+|---|---|
+| `AEM_BASE_URL` | Author instance, e.g. `https://author-p123-e456.adobeaemcloud.com` or `https://aem.corp.example:4502`. Unset means sample content only. |
+| `AEM_FLAVOR` | `cloud` or `65`. Detected from the host (`*.adobeaemcloud.com` is cloud) if unset. |
+| `AEM_TOKEN` | Bearer token (Cloud Service access token / service credential). |
+| `AEM_USER`, `AEM_PASSWORD` | Basic auth, typically for 6.5. Used when `AEM_TOKEN` is unset. |
+| `AEM_TARGET_FOLDER` | Where new fragments are saved, inside `/content/dam/`, e.g. `/content/dam/generated`. Unset means read-only. |
+
+Both platforms are served through the Assets HTTP API (`/api/assets`, which maps to `/content/dam`); only authentication differs.
+
+> **Not yet verified against a real AEM.** The client follows Adobe's documented Assets HTTP API and is tested against `tests/helpers/fake-aem.mjs`, which imitates both platforms' authentication, including a 6.5-style login redirect. Check the response shape and the create call against a real Cloud Service and a real 6.5 instance. In particular, fragment models are inferred from the fragment's fields rather than read from the model definition.
+
 ## Tests
 
 ```bash
 npm test           # compiler unit tests (esbuild-wasm in Node)
-npm run test:e2e   # Playwright against the real app + preview origin
+npm run test:e2e   # Playwright against the real app, the preview origin and a fake AEM
 ```
 
 ## Deploying

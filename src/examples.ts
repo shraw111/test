@@ -68,6 +68,52 @@ export function PlanCard({ name, price, features, popular, yearly }: Props) {
 `,
   },
 
+  "AEM content fragments": {
+    "App.tsx": `import { Badge, Button, Card, MockShell, Stack, Text } from "@ds/ui";
+import { useFragment, useFragmentList } from "@aem/content";
+
+function Hero() {
+  const { data, loading, error } = useFragment("/content/dam/sample/summer-sale");
+  if (error) return <Text tone="muted">{error}</Text>;
+  if (!data) return <Text tone="muted">{loading ? "Loading…" : "No content"}</Text>;
+  return (
+    <Card title={data.headline}>
+      <Stack gap={3}>
+        <Text size="lg">{data.subhead}</Text>
+        <Button>{data.ctaLabel}</Button>
+      </Stack>
+    </Card>
+  );
+}
+
+function OtherBanners() {
+  const { data } = useFragmentList("HeroBanner");
+  return (
+    <Stack gap={2}>
+      <Text size="sm" tone="muted">All hero banners</Text>
+      {data?.map((banner) => (
+        <Stack key={banner._path} direction="row" gap={2}>
+          <Badge tone="success">{banner._title}</Badge>
+          <Text>{banner.subhead}</Text>
+        </Stack>
+      ))}
+    </Stack>
+  );
+}
+
+export default function App() {
+  return (
+    <MockShell title="Acme">
+      <Stack gap={6}>
+        <Hero />
+        <OtherBanners />
+      </Stack>
+    </MockShell>
+  );
+}
+`,
+  },
+
   "Plain React counter": {
     "App.tsx": `import { useState } from "react";
 

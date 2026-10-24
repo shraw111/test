@@ -16,6 +16,10 @@ const appCss = document.getElementById("app-css");
 let root = null;
 let currentBuild = null;
 let lastUrl = null;
+// Newest build requested so far. Imports can finish out of order (a module with
+// top-level await, or just a bigger bundle), and an older build must never
+// replace a newer one.
+let newestRequested = 0;
 const reported = new Set();
 
 function send(message) {
@@ -78,6 +82,7 @@ function Rendered({ buildId, children }) {
 }
 
 async function load({ buildId, js, css }) {
+  newestRequested = Math.max(newestRequested, buildId);
   // Set before import so top-level console output and errors of the new
   // module are attributed to this build.
   currentBuild = buildId;
@@ -86,8 +91,13 @@ async function load({ buildId, js, css }) {
   try {
     mod = await import(url);
   } catch (error) {
-    // Keep the last good build on screen; just report why this one failed.
-    reportError("module", error);
+    URL.revokeObjectURL(url);
+    // A superseded build's failure is irrelevant. Otherwise keep the last good
+    // build on screen and just report why this one failed.
+    if (buildId >= newestRequested) reportError("module", error);
+    return;
+  }
+  if (buildId < newestRequested) {
     URL.revokeObjectURL(url);
     return;
   }

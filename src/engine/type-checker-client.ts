@@ -17,12 +17,12 @@ export class TypeCheckerClient {
     return worker;
   }
 
-  check(files: Files): Promise<Diagnostic[]> {
+  check(files: Files, ambient?: Record<string, string>): Promise<Diagnostic[]> {
     this.worker ??= this.start();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.worker!.postMessage({ id, files });
+      this.worker!.postMessage({ id, files, ambient });
     });
   }
 

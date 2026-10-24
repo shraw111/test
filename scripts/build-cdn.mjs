@@ -88,6 +88,15 @@ await esbuild.build({
   logLevel: "warning",
 });
 await esbuild.build({
+  entryPoints: [join(root, "content/src/index.ts")],
+  bundle: true,
+  format: "esm",
+  target: "es2020",
+  external: shared,
+  outfile: join(out, url("@aem/content")),
+  logLevel: "warning",
+});
+await esbuild.build({
   entryPoints: [join(root, "ds/src/styles.css")],
   bundle: true,
   outfile: join(out, config.styles[0].replace(/^\//, "")),
